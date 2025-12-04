@@ -290,25 +290,86 @@ export async function getRevenueSummary(filters?: {
 
     await connectDB();
 
+    // Build query for paid invoices
     let query: any = { status: "paid" };
+
+    // If date filters are provided, use paidDate if it exists, otherwise use updatedAt
     if (filters?.startDate || filters?.endDate) {
-      query.paidDate = {};
-      if (filters.startDate) query.paidDate.$gte = filters.startDate;
-      if (filters.endDate) query.paidDate.$lte = filters.endDate;
+      const dateConditions = [];
+
+      // Match invoices with paidDate in range
+      const paidDateCondition: any = { paidDate: { $exists: true, $ne: null } };
+      if (filters.startDate)
+        paidDateCondition.paidDate.$gte = filters.startDate;
+      if (filters.endDate) paidDateCondition.paidDate.$lte = filters.endDate;
+      dateConditions.push(paidDateCondition);
+
+      // Also match invoices without paidDate but with updatedAt in range (fallback)
+      const updatedAtCondition: any = {
+        $or: [{ paidDate: { $exists: false } }, { paidDate: null }],
+        updatedAt: {},
+      };
+      if (filters.startDate)
+        updatedAtCondition.updatedAt.$gte = filters.startDate;
+      if (filters.endDate) updatedAtCondition.updatedAt.$lte = filters.endDate;
+      dateConditions.push(updatedAtCondition);
+
+      query.$or = dateConditions;
     }
 
+    // Calculate total revenue
     const revenue = await Invoice.aggregate([
       { $match: query },
       { $group: { _id: null, total: { $sum: "$amount" } } },
     ]);
 
-    const monthlyRevenue = await Invoice.aggregate([
+    // Calculate revenue by invoice type
+    const revenueByType = await Invoice.aggregate([
       { $match: query },
       {
         $group: {
+          _id: "$type",
+          total: { $sum: "$amount" },
+        },
+      },
+    ]);
+
+    // Map invoice types to revenue categories
+    let rentRevenue = 0;
+    let utilityRevenue = 0;
+    let serviceRevenue = 0;
+
+    revenueByType.forEach((item) => {
+      switch (item._id) {
+        case "rent":
+          rentRevenue = item.total;
+          break;
+        case "utilities":
+          utilityRevenue = item.total;
+          break;
+        case "maintenance":
+        case "parking":
+        case "other":
+          serviceRevenue += item.total;
+          break;
+      }
+    });
+
+    // Calculate monthly revenue - use paidDate if available, otherwise updatedAt
+    const monthlyRevenue = await Invoice.aggregate([
+      { $match: query },
+      {
+        $addFields: {
+          dateToUse: {
+            $ifNull: ["$paidDate", "$updatedAt"],
+          },
+        },
+      },
+      {
+        $group: {
           _id: {
-            year: { $year: "$paidDate" },
-            month: { $month: "$paidDate" },
+            year: { $year: "$dateToUse" },
+            month: { $month: "$dateToUse" },
           },
           total: { $sum: "$amount" },
           count: { $sum: 1 },
@@ -321,6 +382,9 @@ export async function getRevenueSummary(filters?: {
       success: true,
       revenue: {
         total: revenue[0]?.total || 0,
+        rent: rentRevenue,
+        utility: utilityRevenue,
+        service: serviceRevenue,
         monthly: monthlyRevenue,
       },
     };
