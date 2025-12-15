@@ -36,6 +36,9 @@ export async function GET(request: NextRequest) {
     // Transform to match frontend expectations
     const revenueSummary = {
       total_revenue: result.revenue?.total || 0,
+      rent_revenue: result.revenue?.rent || 0,
+      utility_revenue: result.revenue?.utility || 0,
+      service_revenue: result.revenue?.service || 0,
       monthly_revenue: result.revenue?.monthly || [],
     };
 

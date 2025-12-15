@@ -10,6 +10,7 @@ export interface IInvoice extends Document {
   issueDate: Date;
   dueDate: Date;
   status: "pending" | "paid" | "overdue" | "cancelled";
+  paidDate?: Date;
   description?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -56,6 +57,10 @@ const InvoiceSchema = new Schema<IInvoice>(
       enum: ["pending", "paid", "overdue", "cancelled"],
       default: "pending",
     },
+    paidDate: {
+      type: Date,
+      default: null,
+    },
     description: {
       type: String,
       trim: true,
@@ -72,6 +77,7 @@ InvoiceSchema.index({ userId: 1 });
 InvoiceSchema.index({ apartmentId: 1 });
 InvoiceSchema.index({ status: 1 });
 InvoiceSchema.index({ dueDate: 1 });
+InvoiceSchema.index({ paidDate: 1 });
 
 export const Invoice =
   (mongoose.models?.Invoice as mongoose.Model<IInvoice>) ||

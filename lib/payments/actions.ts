@@ -258,8 +258,10 @@ export async function getAllInvoices(filters?: {
         apartment_id: invoice.apartmentId?._id.toString(),
         apartment_number: invoice.apartmentId?.apartmentNumber,
         building: invoice.apartmentId?.building,
+        type: invoice.type,
         amount: invoice.amount,
         status: invoice.status,
+        issue_date: invoice.issueDate?.toISOString(),
         due_date: invoice.dueDate?.toISOString(),
         paid_date: invoice.paidDate?.toISOString(),
         created_at: invoice.createdAt?.toISOString(),
@@ -298,20 +300,34 @@ export async function getRevenueSummary(filters?: {
       const dateConditions = [];
 
       // Match invoices with paidDate in range
-      const paidDateCondition: any = { paidDate: { $exists: true, $ne: null } };
-      if (filters.startDate)
+      const paidDateCondition: any = {
+        paidDate: { $exists: true, $ne: null },
+      };
+      if (filters.startDate) {
         paidDateCondition.paidDate.$gte = filters.startDate;
-      if (filters.endDate) paidDateCondition.paidDate.$lte = filters.endDate;
+      }
+      if (filters.endDate) {
+        if (!paidDateCondition.paidDate.$gte) {
+          paidDateCondition.paidDate.$lte = filters.endDate;
+        } else {
+          paidDateCondition.paidDate.$lte = filters.endDate;
+        }
+      }
       dateConditions.push(paidDateCondition);
 
       // Also match invoices without paidDate but with updatedAt in range (fallback)
       const updatedAtCondition: any = {
         $or: [{ paidDate: { $exists: false } }, { paidDate: null }],
-        updatedAt: {},
       };
-      if (filters.startDate)
-        updatedAtCondition.updatedAt.$gte = filters.startDate;
-      if (filters.endDate) updatedAtCondition.updatedAt.$lte = filters.endDate;
+      if (filters.startDate || filters.endDate) {
+        updatedAtCondition.updatedAt = {};
+        if (filters.startDate) {
+          updatedAtCondition.updatedAt.$gte = filters.startDate;
+        }
+        if (filters.endDate) {
+          updatedAtCondition.updatedAt.$lte = filters.endDate;
+        }
+      }
       dateConditions.push(updatedAtCondition);
 
       query.$or = dateConditions;
@@ -339,20 +355,44 @@ export async function getRevenueSummary(filters?: {
     let utilityRevenue = 0;
     let serviceRevenue = 0;
 
+    // Log revenue by type for debugging
+    console.log("Revenue by type:", JSON.stringify(revenueByType, null, 2));
+
     revenueByType.forEach((item) => {
-      switch (item._id) {
+      if (!item._id || !item.total) {
+        console.warn(`Invalid revenue item:`, item);
+        return;
+      }
+      
+      const type = String(item._id).toLowerCase().trim();
+      const amount = Number(item.total) || 0;
+      
+      switch (type) {
         case "rent":
-          rentRevenue = item.total;
+          rentRevenue = amount;
           break;
         case "utilities":
-          utilityRevenue = item.total;
+          utilityRevenue = amount;
           break;
         case "maintenance":
         case "parking":
         case "other":
-          serviceRevenue += item.total;
+          serviceRevenue += amount;
+          break;
+        default:
+          // Any unknown type should be treated as service revenue
+          console.log(`Unknown invoice type: ${item._id}, adding ${amount} to service revenue`);
+          serviceRevenue += amount;
           break;
       }
+    });
+
+    // Log final revenue breakdown for debugging
+    console.log("Revenue breakdown:", {
+      rent: rentRevenue,
+      utility: utilityRevenue,
+      service: serviceRevenue,
+      total: revenue[0]?.total || 0,
     });
 
     // Calculate monthly revenue - use paidDate if available, otherwise updatedAt
